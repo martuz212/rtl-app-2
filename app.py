@@ -3,7 +3,7 @@ import os
 import math
 import streamlit as st
 import pandas as pd
-import matplotlib.pyplot as plt
+import plotly.graph_objects as go
 
 st.set_page_config(page_title="RTL–MC PRECISO PRO", layout="wide")
 st.title("🧭 RTL–MC PRECISO PRO")
@@ -117,6 +117,66 @@ def crear_plantilla():
         puntos.to_excel(w, sheet_name="PUNTOS", index=False)
         lineas.to_excel(w, sheet_name="LINEAS", index=False)
     return puntos, lineas, buf.getvalue()
+
+
+PALETA = ["#2a78d6", "#e8590c", "#2f9e44", "#ae3ec9", "#c92a2a", "#0c8599",
+          "#e6a700", "#5f3dc4", "#d6336c", "#495057", "#66a80f"]
+
+
+def figura_poligono(puntos, coords, bloques, etiquetar_todos=False, tam=7):
+    """puntos: lista de ids ('01', ...); coords: {id: (N, E)};
+    bloques: lista de listas de tramos (cada tramo con INI, FIN, COL, CARD)."""
+    hov = lambda p: f"<b>Punto {p}</b><br>N: {coords[p][0]:,.2f}<br>E: {coords[p][1]:,.2f}"
+    fig = go.Figure()
+
+    # relleno suave del polígono
+    anillo = puntos + [puntos[0]]
+    fig.add_trace(go.Scatter(
+        x=[coords[p][1] for p in anillo], y=[coords[p][0] for p in anillo],
+        mode="lines", fill="toself", fillcolor="rgba(42,120,214,0.08)",
+        line=dict(width=0), hoverinfo="skip", showlegend=False))
+
+    # una línea de color por lindero
+    cambios = []
+    for k, b in enumerate(bloques, start=1):
+        ids = [t["INI"] for t in b] + [b[-1]["FIN"]]
+        cambios.append(ids[0])
+        fig.add_trace(go.Scatter(
+            x=[coords[p][1] for p in ids], y=[coords[p][0] for p in ids],
+            mode="lines", line=dict(color=PALETA[(k - 1) % len(PALETA)], width=3.5),
+            name=f"L{k} · {b[0]['CARD']} · {b[0]['COL']}", hoverinfo="skip"))
+
+    # todos los vértices: círculo blanco con borde oscuro
+    fig.add_trace(go.Scatter(
+        x=[coords[p][1] for p in puntos], y=[coords[p][0] for p in puntos],
+        mode="markers+text" if etiquetar_todos else "markers",
+        text=puntos, textposition="top right", textfont=dict(size=11),
+        marker=dict(size=tam, color="#ffffff", line=dict(color="#1f2933", width=1.6)),
+        hovertext=[hov(p) for p in puntos], hoverinfo="text", showlegend=False))
+
+    # puntos donde cambia el colindante (más grandes y siempre etiquetados)
+    cambios = [p for p in cambios if p != puntos[0]]
+    fig.add_trace(go.Scatter(
+        x=[coords[p][1] for p in cambios], y=[coords[p][0] for p in cambios],
+        mode="markers+text", text=cambios, textposition="top right", textfont=dict(size=12),
+        marker=dict(size=tam + 4, color="#1f2933", line=dict(color="#ffffff", width=2)),
+        hovertext=[hov(p) for p in cambios], hoverinfo="text", showlegend=False))
+
+    # punto de inicio
+    p0 = puntos[0]
+    fig.add_trace(go.Scatter(
+        x=[coords[p0][1]], y=[coords[p0][0]], mode="markers+text",
+        text=[f"{p0} · inicio"], textposition="bottom left", textfont=dict(size=12),
+        marker=dict(size=tam + 8, symbol="diamond", color="#2f9e44", line=dict(color="#ffffff", width=2)),
+        hovertext=[hov(p0)], hoverinfo="text", showlegend=False))
+
+    fig.update_layout(
+        height=620, margin=dict(l=70, r=10, t=10, b=45), dragmode="pan",
+        legend=dict(orientation="h", y=-0.18, font=dict(size=11)),
+        xaxis=dict(title="Este (E)", tickformat=".0f", exponentformat="none", zeroline=False),
+        yaxis=dict(title="Norte (N)", tickformat=".0f", exponentformat="none", zeroline=False,
+                   scaleanchor="x", scaleratio=1))  # escala 1:1 real, sin deformar el predio
+    return fig
 
 
 def validar(df_p, df_l):
@@ -313,23 +373,6 @@ if puntos_file and lineas_file:
                          "Elimina el duplicado o corrige las coordenadas."], [])
 
     # =====================================================
-    # VISUALIZACIÓN
-    # =====================================================
-    st.markdown("### 🗺️ Visualización del polígono")
-
-    x = [coords[p][1] for p in puntos]
-    y = [coords[p][0] for p in puntos]
-    x.append(x[0])
-    y.append(y[0])
-
-    fig, ax = plt.subplots()
-    ax.plot(x, y, marker='o')
-    for i, p in enumerate(puntos):
-        ax.text(x[i], y[i], p)
-    ax.ticklabel_format(useOffset=False, style="plain")
-    st.pyplot(fig)
-
-    # =====================================================
     # TRAMOS
     # =====================================================
     tramos = []
@@ -388,6 +431,17 @@ if puntos_file and lineas_file:
             bloques.append(actual)
             actual = [t]
     bloques.append(actual)
+
+    # =====================================================
+    # VISUALIZACIÓN
+    # =====================================================
+    st.markdown("### 🗺️ Visualización del polígono")
+    c1, c2 = st.columns(2)
+    etiquetar = c1.checkbox("Etiquetar todos los puntos", value=False)
+    tam = c2.slider("Tamaño de puntos", 4, 14, 7)
+    fig = figura_poligono(puntos, coords, bloques, etiquetar, tam)
+    st.plotly_chart(fig, use_container_width=True,
+                    config={"scrollZoom": True, "displaylogo": False})
 
     # =====================================================
     # RTL FINAL
